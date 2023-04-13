@@ -1,6 +1,8 @@
 { pkgs ? import <nixpkgs> { } }:
 pkgs.mkShell rec {
-  buildInputs = with pkgs; [ clang llvmPackages.bintools rustup ];
+  buildInputs = with pkgs;
+    [ clang llvmPackages.bintools rustup ]
+    ++ (if pkgs.stdenv.isDarwin then [ darwin.libiconv ] else [ ]);
   RUSTC_VERSION = pkgs.lib.readFile ./rust-toolchain;
   # https://github.com/rust-lang/rust-bindgen#environment-variables
   LIBCLANG_PATH =
@@ -10,10 +12,13 @@ pkgs.mkShell rec {
     export PATH=$PATH:''${RUSTUP_HOME:-~/.rustup}/toolchains/$RUSTC_VERSION-x86_64-unknown-linux-gnu/bin/
   '';
   # Add libvmi precompiled library to rustc search path
-  RUSTFLAGS = (builtins.map (a: "-L ${a}/lib") [ pkgs.libvmi ]);
+  RUSTFLAGS = if (!pkgs.stdenv.isDarwin) then
+    (builtins.map (a: "-L ${a}/lib") [ pkgs.libvmi ])
+  else
+    "";
   # Add libvmi, glibc, clang, glib headers to bindgen search path
-  BINDGEN_EXTRA_CLANG_ARGS =
-    # Includes with normal include path
+  BINDGEN_EXTRA_CLANG_ARGS = if (!pkgs.stdenv.isDarwin) then
+  # Includes with normal include path
     (builtins.map (a: ''-I"${a}/include"'') [ pkgs.libvmi pkgs.glibc.dev ])
     # Includes with special directory paths
     ++ [
@@ -21,6 +26,7 @@ pkgs.mkShell rec {
         -I"${pkgs.llvmPackages_latest.libclang.lib}/lib/clang/${pkgs.llvmPackages_latest.libclang.version}/include"''
       ''-I"${pkgs.glib.dev}/include/glib-2.0"''
       "-I${pkgs.glib.out}/lib/glib-2.0/include/"
-    ];
-
+    ]
+  else
+    "";
 }
