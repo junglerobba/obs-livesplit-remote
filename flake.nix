@@ -18,8 +18,20 @@
               cargoLock.lockFile = ./Cargo.lock;
               src = self;
             };
+          dockerImage = pkgs.dockerTools.buildLayeredImage {
+            name = "obs-livesplit-remote";
+            created = builtins.substring 0 8 self.lastModifiedDate;
+            config = {
+              Entrypoint =
+                [ "${obs-livesplit-remote}/bin/obs-livesplit-remote" ];
+              Cmd = [ "--help" ];
+            };
+          };
         in {
-          packages = { default = obs-livesplit-remote; };
+          packages = {
+            inherit dockerImage;
+            default = obs-livesplit-remote;
+          };
           devShells.default = pkgs.mkShell {
             buildInputs = with pkgs;
               with pkgs.rustPlatform;
