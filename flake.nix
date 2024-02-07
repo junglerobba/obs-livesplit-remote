@@ -17,15 +17,13 @@
               inherit (cargoToml.package) name version;
               cargoLock.lockFile = ./Cargo.lock;
               src = self;
-              nativeBuildInputs = [ pkg-config ];
-              buildInputs = [ openssl ];
             };
         in {
           packages = { default = obs-livesplit-remote; };
           devShells.default = pkgs.mkShell {
             buildInputs = with pkgs;
               with pkgs.rustPlatform;
-              [ cargo rustc rustfmt rust-analyzer openssl pkg-config ]
+              [ cargo rustc rustfmt rust-analyzer ]
               ++ lib.optionals stdenv.isDarwin [ darwin.libiconv ];
           };
         };
