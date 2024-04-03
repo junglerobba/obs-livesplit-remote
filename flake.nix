@@ -1,43 +1,56 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    flake-parts.url = "github:hercules-ci/flake-parts";
+    crane = {
+      url = "github:ipetkov/crane";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    flake-utils.url = "github:numtide/flake-utils";
+    advisory-db = {
+      url = "github:rustsec/advisory-db";
+      flake = false;
+    };
   };
 
-  outputs = inputs@{ self, nixpkgs, flake-parts, ... }:
-    flake-parts.lib.mkFlake { inherit inputs; } {
-      systems =
-        [ "x86_64-linux" "x86_64-darwin" "aarch64-darwin" "aarch64-linux" ];
-      perSystem = { config, self', inputs', pkgs, system, ... }:
-        let
-          pkgs = import nixpkgs { inherit system; };
-          cargoToml = pkgs.lib.importTOML "${self}/Cargo.toml";
-          obs-livesplit-remote = with pkgs;
-            rustPlatform.buildRustPackage {
-              inherit (cargoToml.package) name version;
-              cargoLock.lockFile = ./Cargo.lock;
-              src = self;
-            };
-          dockerImage = pkgs.dockerTools.buildLayeredImage {
-            name = "obs-livesplit-remote";
-            created = builtins.substring 0 8 self.lastModifiedDate;
-            config = {
-              Entrypoint =
-                [ "${obs-livesplit-remote}/bin/obs-livesplit-remote" ];
-              Cmd = [ "--help" ];
-            };
-          };
-        in {
-          packages = {
-            inherit dockerImage;
-            default = obs-livesplit-remote;
-          };
-          devShells.default = pkgs.mkShell {
-            buildInputs = with pkgs;
-              with pkgs.rustPlatform;
-              [ cargo rustc rustfmt rust-analyzer ]
-              ++ lib.optionals stdenv.isDarwin [ darwin.libiconv ];
+  outputs = { self, nixpkgs, crane, flake-utils, advisory-db, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
+      let
+        pkgs = import nixpkgs { inherit system; };
+        craneLib = crane.lib.${system};
+        src = craneLib.cleanCargoSource (craneLib.path ./.);
+        commonArgs = {
+          inherit src;
+          strictDeps = true;
+        };
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+        obs-livesplit-remote =
+          craneLib.buildPackage (commonArgs // { inherit cargoArtifacts; });
+        dockerImage = pkgs.dockerTools.buildLayeredImage {
+          name = "obs-livesplit-remote";
+          created = builtins.substring 0 8 self.lastModifiedDate;
+          config = {
+            Entrypoint = [ "${obs-livesplit-remote}/bin/obs-livesplit-remote" ];
+            Cmd = [ "--help" ];
           };
         };
-    };
+      in {
+        checks = {
+          inherit obs-livesplit-remote;
+
+          clippy = craneLib.cargoClippy (commonArgs // {
+            inherit cargoArtifacts;
+            cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+          });
+          fmt = craneLib.cargoFmt { inherit src; };
+          audit = craneLib.cargoAudit { inherit src advisory-db; };
+        };
+        packages = {
+          inherit dockerImage;
+          default = obs-livesplit-remote;
+        };
+        devShells.default = craneLib.devShell {
+          checks = self.checks.${system};
+          packages = with pkgs; [ rust-analyzer cargo-audit ];
+        };
+      });
 }
